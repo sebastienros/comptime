@@ -71,6 +71,15 @@ public sealed class ComptimeSourceGenerator : IIncrementalGenerator
         isEnabledByDefault: true,
         description: "Methods marked with [Comptime] must return a type that can be serialized to C#.");
 
+    private static readonly DiagnosticDescriptor ArrayReturnTypeNotAllowedDescriptor = new(
+        "COMPTIME011",
+        "Array return type not allowed",
+        "[Comptime] method '{0}' returns an array type '{1}'. Arrays are not allowed because they are mutable; use IReadOnlyList<T> instead.",
+        "Comptime",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Methods marked with [Comptime] must not return array types because arrays are mutable. Use IReadOnlyList<T> instead.");
+
     private static readonly DiagnosticDescriptor GenerationSucceededDescriptor = new(
         "COMPTIME000",
         "Compile-time execution succeeded",
@@ -661,6 +670,17 @@ public sealed class ComptimeSourceGenerator : IIncrementalGenerator
 
             // Get the return type
             var returnType = method.ReturnType;
+
+            // Check if the type is an array (not allowed because arrays are mutable)
+            if (returnType.IsArray)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    ArrayReturnTypeNotAllowedDescriptor,
+                    methodInfo.AttributeLocation ?? methodSymbol.Locations.FirstOrDefault(),
+                    methodSymbol.Name,
+                    returnType.FullName));
+                return;
+            }
 
             // Check if the type can be serialized
             if (!CSharpSerializer.CanSerialize(returnType))

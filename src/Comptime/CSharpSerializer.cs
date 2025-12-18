@@ -430,11 +430,10 @@ public static class CSharpSerializer
             return true;
         }
 
-        // Check arrays of serializable types
+        // Arrays are not allowed as return types because they are not immutable
         if (type.IsArray)
         {
-            var elementType = type.GetElementType();
-            return elementType != null && CanSerialize(elementType);
+            return false;
         }
 
         // Check generic collections

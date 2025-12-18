@@ -7,10 +7,10 @@ namespace Comptime.Tests;
 public static partial class ComptimeMethods
 {
     /// <summary>
-    /// Returns an array of prime numbers computed at compile time.
+    /// Returns a list of prime numbers computed at compile time.
     /// </summary>
     [Comptime]
-    public static int[] GetPrimeNumbers()
+    public static IReadOnlyList<int> GetPrimeNumbers()
     {
         var primes = new List<int>();
         for (int i = 2; i <= 30; i++)
@@ -20,7 +20,7 @@ public static partial class ComptimeMethods
                 primes.Add(i);
             }
         }
-        return primes.ToArray();
+        return primes;
     }
 
     private static bool IsPrime(int n)
@@ -72,10 +72,10 @@ public static partial class ComptimeMethods
     }
 
     /// <summary>
-    /// Returns an array of strings computed at compile time.
+    /// Returns a list of strings computed at compile time.
     /// </summary>
     [Comptime]
-    public static string[] GetDaysOfWeek()
+    public static IReadOnlyList<string> GetDaysOfWeek()
     {
         return new[] { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" };
     }
@@ -118,10 +118,10 @@ public static partial class ComptimeMethods
     }
 
     /// <summary>
-    /// Returns an array with special characters in strings.
+    /// Returns a list with special characters in strings.
     /// </summary>
     [Comptime]
-    public static string[] GetSpecialStrings()
+    public static IReadOnlyList<string> GetSpecialStrings()
     {
         return new[]
         {
@@ -134,10 +134,10 @@ public static partial class ComptimeMethods
     }
 
     /// <summary>
-    /// Returns an array of chars.
+    /// Returns a list of chars.
     /// </summary>
     [Comptime]
-    public static char[] GetVowels()
+    public static IReadOnlyList<char> GetVowels()
     {
         return new[] { 'a', 'e', 'i', 'o', 'u' };
     }

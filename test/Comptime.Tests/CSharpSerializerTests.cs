@@ -278,8 +278,8 @@ public class CSharpSerializerTests
     [InlineData(typeof(bool), true)]
     [InlineData(typeof(int), true)]
     [InlineData(typeof(string), true)]
-    [InlineData(typeof(int[]), true)]
-    [InlineData(typeof(string[]), true)]
+    [InlineData(typeof(int[]), false)] // arrays are not allowed (not immutable)
+    [InlineData(typeof(string[]), false)] // arrays are not allowed (not immutable)
     [InlineData(typeof(List<int>), true)]
     [InlineData(typeof(IReadOnlyList<string>), true)]
     [InlineData(typeof(Dictionary<string, int>), true)]

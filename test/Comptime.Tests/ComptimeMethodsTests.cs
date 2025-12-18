@@ -51,7 +51,7 @@ public class ComptimeMethodsTests
         var days = ComptimeMethods.GetDaysOfWeek();
         
         Assert.NotNull(days);
-        Assert.Equal(7, days.Length);
+        Assert.Equal(7, days.Count);
         Assert.Equal("Monday", days[0]);
         Assert.Equal("Sunday", days[6]);
     }
@@ -83,7 +83,7 @@ public class ComptimeMethodsTests
         var strings = ComptimeMethods.GetSpecialStrings();
         
         Assert.NotNull(strings);
-        Assert.Equal(5, strings.Length);
+        Assert.Equal(5, strings.Count);
         Assert.Equal("Hello\nWorld", strings[0]);
         Assert.Equal("Tab\tSeparated", strings[1]);
         Assert.Equal("Quote\"Inside", strings[2]);
