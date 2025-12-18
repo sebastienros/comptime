@@ -1,8 +1,7 @@
-using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace Comptime;
 
@@ -176,57 +175,12 @@ public static class CSharpSerializer
 
     private static string SerializeChar(char c)
     {
-        return c switch
-        {
-            '\0' => "'\\0'",
-            '\a' => "'\\a'",
-            '\b' => "'\\b'",
-            '\f' => "'\\f'",
-            '\n' => "'\\n'",
-            '\r' => "'\\r'",
-            '\t' => "'\\t'",
-            '\v' => "'\\v'",
-            '\\' => "'\\\\'",
-            '\'' => "'\\''",
-            _ when char.IsControl(c) => $"'\\u{(int)c:X4}'",
-            _ => $"'{c}'"
-        };
+        return SyntaxFactory.Literal(c).ToString();
     }
 
     private static string SerializeString(string s)
     {
-        var sb = new StringBuilder(s.Length + 2);
-        sb.Append('"');
-        
-        foreach (var c in s)
-        {
-            switch (c)
-            {
-                case '\0': sb.Append("\\0"); break;
-                case '\a': sb.Append("\\a"); break;
-                case '\b': sb.Append("\\b"); break;
-                case '\f': sb.Append("\\f"); break;
-                case '\n': sb.Append("\\n"); break;
-                case '\r': sb.Append("\\r"); break;
-                case '\t': sb.Append("\\t"); break;
-                case '\v': sb.Append("\\v"); break;
-                case '\\': sb.Append("\\\\"); break;
-                case '"': sb.Append("\\\""); break;
-                default:
-                    if (char.IsControl(c))
-                    {
-                        sb.Append($"\\u{(int)c:X4}");
-                    }
-                    else
-                    {
-                        sb.Append(c);
-                    }
-                    break;
-            }
-        }
-        
-        sb.Append('"');
-        return sb.ToString();
+        return SyntaxFactory.Literal(s).ToString();
     }
 
     private static string SerializeArray(Array array, Type elementType)
