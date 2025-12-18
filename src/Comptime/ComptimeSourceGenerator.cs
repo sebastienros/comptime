@@ -53,15 +53,6 @@ public sealed class ComptimeSourceGenerator : IIncrementalGenerator
         isEnabledByDefault: true,
         description: "Methods marked with [Comptime] must be static.");
 
-    private static readonly DiagnosticDescriptor MethodHasParametersDescriptor = new(
-        "COMPTIME003",
-        "Method must be parameterless",
-        "[Comptime] method '{0}' must not have parameters",
-        "Comptime",
-        DiagnosticSeverity.Error,
-        isEnabledByDefault: true,
-        description: "Methods marked with [Comptime] must be parameterless.");
-
     private static readonly DiagnosticDescriptor UnsupportedReturnTypeDescriptor = new(
         "COMPTIME004",
         "Unsupported return type",
@@ -79,6 +70,15 @@ public sealed class ComptimeSourceGenerator : IIncrementalGenerator
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "Methods marked with [Comptime] must not return array types because arrays are mutable. Use IReadOnlyList<T> instead.");
+
+    private static readonly DiagnosticDescriptor ArgumentMustBeConstantDescriptor = new(
+        "COMPTIME012",
+        "Argument must be a constant",
+        "Argument '{0}' to [Comptime] method '{1}' must be a compile-time constant literal or an expression of literals. Variables, method calls, and other non-constant expressions are not allowed.",
+        "Comptime",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Arguments to [Comptime] methods must be compile-time constant literals or expressions of literals. Variables, method calls, loops, and other non-constant expressions cannot be evaluated at compile time.");
 
     private static readonly DiagnosticDescriptor GenerationSucceededDescriptor = new(
         "COMPTIME000",
@@ -236,8 +236,29 @@ public sealed class ComptimeSourceGenerator : IIncrementalGenerator
                     // Get invocations for this method
                     var methodKey = GetMethodKey(m.Value.Method);
                     invocationsByMethod.TryGetValue(methodKey, out var methodInvocations);
+                    
+                    // Report errors for invocations with non-constant arguments and filter them out
+                    var validInvocations = new List<InvocationInfo>();
+                    if (methodInvocations is not null)
+                    {
+                        foreach (var inv in methodInvocations)
+                        {
+                            if (inv.ErrorMessage is not null)
+                            {
+                                spc.ReportDiagnostic(Diagnostic.Create(
+                                    ArgumentMustBeConstantDescriptor,
+                                    inv.Location,
+                                    inv.ErrorMessage,
+                                    m.Value.Method.Name));
+                            }
+                            else
+                            {
+                                validInvocations.Add(inv);
+                            }
+                        }
+                    }
 
-                    GenerateForMethod(spc, compilation, tfmInfo, m.Value, methodInvocations ?? new List<InvocationInfo>());
+                    GenerateForMethod(spc, compilation, tfmInfo, m.Value, validInvocations);
                 }
                 catch (Exception ex)
                 {
@@ -285,10 +306,35 @@ public sealed class ComptimeSourceGenerator : IIncrementalGenerator
             return null;
         }
 
-        // Only intercept parameterless method calls
-        if (invocation.ArgumentList.Arguments.Count > 0)
+        // Collect argument expressions (must not contain any variable references)
+        var argumentExpressions = new List<string>();
+        string? errorMessage = null;
+        
+        foreach (var arg in invocation.ArgumentList.Arguments)
         {
-            return null;
+            // Check if the expression contains any variable or parameter references
+            var variableReference = FindVariableReference(arg.Expression, semanticModel, ct);
+            if (variableReference is not null)
+            {
+                // Expression contains a variable - cannot be evaluated at compile time
+                errorMessage = variableReference;
+                break;
+            }
+            
+            // Capture the expression source text for compilation
+            argumentExpressions.Add(arg.Expression.ToFullString().Trim());
+        }
+
+        // If there's an error, return an InvocationInfo with the error
+        if (errorMessage is not null)
+        {
+            var methodKey = methodSymbol.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + methodSymbol.Name;
+            return new InvocationInfo(
+                methodKey,
+                null,
+                invocation.GetLocation(),
+                Array.Empty<string>(),
+                errorMessage);
         }
 
         // Get the interceptable location using Roslyn's API
@@ -298,12 +344,66 @@ public sealed class ComptimeSourceGenerator : IIncrementalGenerator
             return null;
         }
 
-        var methodKey = methodSymbol.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + methodSymbol.Name;
+        var methodKeySuccess = methodSymbol.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + methodSymbol.Name;
         
         return new InvocationInfo(
-            methodKey,
+            methodKeySuccess,
             interceptableLocation.GetInterceptsLocationAttributeSyntax(),
-            invocation.GetLocation());
+            invocation.GetLocation(),
+            argumentExpressions.ToArray(),
+            null);
+    }
+
+    /// <summary>
+    /// Recursively checks if an expression contains any variable or parameter references.
+    /// Returns the problematic identifier if found, null otherwise.
+    /// </summary>
+    private static string? FindVariableReference(ExpressionSyntax expression, SemanticModel semanticModel, System.Threading.CancellationToken ct)
+    {
+        foreach (var node in expression.DescendantNodesAndSelf())
+        {
+            if (node is IdentifierNameSyntax identifier)
+            {
+                var symbol = semanticModel.GetSymbolInfo(identifier, ct).Symbol;
+                
+                // Check if it's a variable, parameter, or field that's not a constant
+                if (symbol is ILocalSymbol || symbol is IParameterSymbol)
+                {
+                    return identifier.Identifier.Text;
+                }
+                
+                if (symbol is IFieldSymbol field && !field.IsConst)
+                {
+                    return identifier.Identifier.Text;
+                }
+                
+                // Allow type names, method names, const fields, enum members, etc.
+            }
+        }
+        
+        return null;
+    }
+
+    private static Type? GetRuntimeType(ITypeSymbol typeSymbol)
+    {
+        return typeSymbol.SpecialType switch
+        {
+            SpecialType.System_Boolean => typeof(bool),
+            SpecialType.System_Byte => typeof(byte),
+            SpecialType.System_SByte => typeof(sbyte),
+            SpecialType.System_Int16 => typeof(short),
+            SpecialType.System_UInt16 => typeof(ushort),
+            SpecialType.System_Int32 => typeof(int),
+            SpecialType.System_UInt32 => typeof(uint),
+            SpecialType.System_Int64 => typeof(long),
+            SpecialType.System_UInt64 => typeof(ulong),
+            SpecialType.System_Single => typeof(float),
+            SpecialType.System_Double => typeof(double),
+            SpecialType.System_Decimal => typeof(decimal),
+            SpecialType.System_Char => typeof(char),
+            SpecialType.System_String => typeof(string),
+            _ => null
+        };
     }
 
     private static bool IsCandidateMethod(SyntaxNode node)
@@ -360,13 +460,6 @@ public sealed class ComptimeSourceGenerator : IIncrementalGenerator
         if (!methodSymbol.IsStatic)
         {
             validationErrors.Add(MethodNotStaticDescriptor);
-            validationArgs.Add(new object?[] { methodSymbol.Name });
-        }
-
-        // Method must be parameterless
-        if (methodSymbol.Parameters.Length > 0)
-        {
-            validationErrors.Add(MethodHasParametersDescriptor);
             validationArgs.Add(new object?[] { methodSymbol.Name });
         }
 
@@ -435,8 +528,10 @@ public sealed class ComptimeSourceGenerator : IIncrementalGenerator
     
     private readonly record struct InvocationInfo(
         string TargetMethodKey, 
-        string InterceptsLocationAttribute, 
-        Location Location);
+        string? InterceptsLocationAttribute, 
+        Location Location,
+        string[] ArgumentExpressions,
+        string? ErrorMessage);
 
     [SuppressMessage("Build", "RS1035", Justification = "The generator must execute methods to produce source output.")]
     private static void GenerateForMethod(
@@ -629,9 +724,23 @@ public sealed class ComptimeSourceGenerator : IIncrementalGenerator
                 return;
             }
 
-            var method = type.GetMethod(
-                methodSymbol.Name,
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            // Find the method with matching parameter count
+            var parameterTypes = methodSymbol.Parameters.Select(p => GetRuntimeType(p.Type)).ToArray();
+            MethodInfo? method = null;
+            
+            if (parameterTypes.All(t => t is not null))
+            {
+                method = type.GetMethod(
+                    methodSymbol.Name,
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
+                    null,
+                    parameterTypes!,
+                    null);
+            }
+            
+            // Fallback to finding by name if exact match fails
+            method ??= type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == methodSymbol.Name && m.GetParameters().Length == methodSymbol.Parameters.Length);
 
             if (method is null)
             {
@@ -640,31 +749,6 @@ public sealed class ComptimeSourceGenerator : IIncrementalGenerator
                     methodSymbol.Locations.FirstOrDefault(), 
                     methodSymbol.Name, 
                     containingTypeName));
-                return;
-            }
-
-            // Execute the method to get the return value
-            object? result;
-            try
-            {
-                result = method.Invoke(null, null);
-            }
-            catch (TargetInvocationException ex)
-            {
-                context.ReportDiagnostic(Diagnostic.Create(
-                    ExecutionFailedDescriptor,
-                    methodInfo.AttributeLocation ?? methodSymbol.Locations.FirstOrDefault(),
-                    methodSymbol.Name,
-                    ex.InnerException?.Message ?? ex.Message));
-                return;
-            }
-            catch (Exception ex)
-            {
-                context.ReportDiagnostic(Diagnostic.Create(
-                    ExecutionFailedDescriptor,
-                    methodInfo.AttributeLocation ?? methodSymbol.Locations.FirstOrDefault(),
-                    methodSymbol.Name,
-                    ex.Message));
                 return;
             }
 
@@ -693,19 +777,103 @@ public sealed class ComptimeSourceGenerator : IIncrementalGenerator
                 return;
             }
 
-            // Serialize the result to C#
-            if (!CSharpSerializer.TrySerialize(result, returnType, out var serializedValue, out var serializeError))
+            // Group invocations by their argument expressions to avoid duplicate execution
+            var invocationGroups = new List<(string ArgsKey, string[] ArgExpressions, List<InvocationInfo> Invocations)>();
+            
+            foreach (var inv in invocations)
             {
-                context.ReportDiagnostic(Diagnostic.Create(
-                    SerializationFailedDescriptor,
-                    methodInfo.AttributeLocation ?? methodSymbol.Locations.FirstOrDefault(),
-                    methodSymbol.Name,
-                    serializeError));
+                // Create a key based on argument expressions
+                var argsKey = string.Join("|", inv.ArgumentExpressions);
+                
+                var existingGroup = invocationGroups.FirstOrDefault(g => g.ArgsKey == argsKey);
+                if (existingGroup.Invocations is not null)
+                {
+                    existingGroup.Invocations.Add(inv);
+                }
+                else
+                {
+                    invocationGroups.Add((argsKey, inv.ArgumentExpressions, new List<InvocationInfo> { inv }));
+                }
+            }
+
+            // Execute method for each unique argument combination and collect results
+            var executionResults = new List<(string SerializedValue, string[] ArgExpressions, List<InvocationInfo> Invocations)>();
+            
+            foreach (var (argsKey, argExpressions, groupInvocations) in invocationGroups)
+            {
+                object? result;
+                try
+                {
+                    // For methods with arguments, we need to invoke with the evaluated expressions
+                    if (argExpressions.Length > 0)
+                    {
+                        // Create a wrapper method that calls the original method with the literal expressions
+                        var wrapperResult = ExecuteMethodWithArguments(
+                            tempCompilation, 
+                            parseOptions, 
+                            methodSymbol, 
+                            argExpressions, 
+                            assemblyPaths, 
+                            loadedAssemblies,
+                            pendingCompilationRefs);
+                        
+                        if (wrapperResult.Error is not null)
+                        {
+                            context.ReportDiagnostic(Diagnostic.Create(
+                                ExecutionFailedDescriptor,
+                                groupInvocations[0].Location,
+                                methodSymbol.Name,
+                                wrapperResult.Error));
+                            continue;
+                        }
+                        
+                        result = wrapperResult.Result;
+                    }
+                    else
+                    {
+                        result = method.Invoke(null, null);
+                    }
+                }
+                catch (TargetInvocationException ex)
+                {
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        ExecutionFailedDescriptor,
+                        groupInvocations[0].Location,
+                        methodSymbol.Name,
+                        ex.InnerException?.Message ?? ex.Message));
+                    continue;
+                }
+                catch (Exception ex)
+                {
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        ExecutionFailedDescriptor,
+                        groupInvocations[0].Location,
+                        methodSymbol.Name,
+                        ex.Message));
+                    continue;
+                }
+
+                // Serialize the result to C#
+                if (!CSharpSerializer.TrySerialize(result, returnType, out var serializedValue, out var serializeError))
+                {
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        SerializationFailedDescriptor,
+                        groupInvocations[0].Location,
+                        methodSymbol.Name,
+                        serializeError));
+                    continue;
+                }
+
+                executionResults.Add((serializedValue, argExpressions, groupInvocations));
+            }
+
+            if (executionResults.Count == 0)
+            {
                 return;
             }
 
             // Generate the source code
-            var sourceText = GenerateSourceCode(methodSymbol, returnType, serializedValue, invocations, methodInfo.AdditionalUsings);
+            var sourceText = GenerateSourceCode(methodSymbol, returnType, executionResults, methodInfo.AdditionalUsings);
 
             var hintName = $"{methodSymbol.ContainingType.Name}_{methodSymbol.Name}.Comptime.g.cs";
             
@@ -727,8 +895,7 @@ public sealed class ComptimeSourceGenerator : IIncrementalGenerator
     private static string GenerateSourceCode(
         IMethodSymbol methodSymbol,
         Type returnType,
-        string serializedValue,
-        List<InvocationInfo> invocations,
+        List<(string SerializedValue, string[] ArgExpressions, List<InvocationInfo> Invocations)> executionResults,
         string[] additionalUsings)
     {
         var sb = new StringBuilder();
@@ -787,36 +954,51 @@ public sealed class ComptimeSourceGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}{accessibility} static partial class {containingType.Name}");
         sb.AppendLine($"{indent}{{");
 
-        // Generate the cached field
         var returnTypeName = CSharpSerializer.GetTypeName(returnType);
-        var fieldName = $"_comptime_{methodSymbol.Name}";
-        
-        sb.AppendLine($"{indent}    private static readonly {returnTypeName} {fieldName} = {serializedValue};");
-        sb.AppendLine();
-
-        // Generate interceptor method for each call site
-        if (invocations.Count > 0)
+        var methodAccessibility = methodSymbol.DeclaredAccessibility switch
         {
-            var methodAccessibility = methodSymbol.DeclaredAccessibility switch
-            {
-                Accessibility.Public => "public",
-                Accessibility.Internal => "internal",
-                Accessibility.Private => "private",
-                Accessibility.Protected => "protected",
-                Accessibility.ProtectedOrInternal => "protected internal",
-                Accessibility.ProtectedAndInternal => "private protected",
-                _ => "internal"
-            };
+            Accessibility.Public => "public",
+            Accessibility.Internal => "internal",
+            Accessibility.Private => "private",
+            Accessibility.Protected => "protected",
+            Accessibility.ProtectedOrInternal => "protected internal",
+            Accessibility.ProtectedAndInternal => "private protected",
+            _ => "internal"
+        };
 
+        // Build parameter list for interceptor methods using the symbol's type names
+        var parameterList = string.Join(", ", methodSymbol.Parameters.Select(p => 
+            $"{p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)} {p.Name}"));
+
+        // Build type parameter list for generic methods
+        var typeParameterList = methodSymbol.TypeParameters.Length > 0
+            ? "<" + string.Join(", ", methodSymbol.TypeParameters.Select(tp => tp.Name)) + ">"
+            : "";
+
+        // Generate a field and interceptor for each unique argument combination
+        var counter = 0;
+        foreach (var (serializedValue, argExpressions, invocations) in executionResults)
+        {
+            var suffix = counter == 0 ? "" : $"_{counter}";
+            var fieldName = $"_comptime_{methodSymbol.Name}{suffix}";
+            
+            // Generate the cached field
+            sb.AppendLine($"{indent}    private static readonly {returnTypeName} {fieldName} = {serializedValue};");
+            sb.AppendLine();
+
+            // Generate interceptor method with InterceptsLocation attributes for this group
             foreach (var invocation in invocations)
             {
                 sb.AppendLine($"{indent}    {invocation.InterceptsLocationAttribute}");
             }
             
-            sb.AppendLine($"{indent}    {methodAccessibility} static {returnTypeName} {methodSymbol.Name}_Intercepted()");
+            sb.AppendLine($"{indent}    {methodAccessibility} static {returnTypeName} {methodSymbol.Name}_Intercepted{suffix}{typeParameterList}({parameterList})");
             sb.AppendLine($"{indent}    {{");
             sb.AppendLine($"{indent}        return {fieldName};");
             sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            
+            counter++;
         }
 
         sb.AppendLine($"{indent}}}");
@@ -827,6 +1009,83 @@ public sealed class ComptimeSourceGenerator : IIncrementalGenerator
         }
 
         return sb.ToString();
+    }
+
+    [SuppressMessage("Build", "RS1035", Justification = "The generator must execute methods to produce source output.")]
+    private static (object? Result, string? Error) ExecuteMethodWithArguments(
+        RoslynCompilation compilation,
+        CSharpParseOptions parseOptions,
+        IMethodSymbol methodSymbol,
+        string[] argExpressions,
+        Dictionary<string, string> assemblyPaths,
+        Dictionary<string, Assembly> loadedAssemblies,
+        List<(string Name, RoslynCompilation Compilation)> pendingCompilationRefs)
+    {
+        // Build the fully qualified method call
+        var containingTypeName = methodSymbol.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        var argsString = string.Join(", ", argExpressions);
+        
+        // Create a wrapper class with a method that calls the target method with the literal arguments
+        var wrapperCode = $@"
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace ComptimeWrapper
+{{
+    public static class Wrapper
+    {{
+        public static object Execute()
+        {{
+            return {containingTypeName}.{methodSymbol.Name}({argsString});
+        }}
+    }}
+}}
+";
+        
+        var wrapperTree = CSharpSyntaxTree.ParseText(wrapperCode, parseOptions);
+        var wrapperCompilation = compilation.AddSyntaxTrees(wrapperTree);
+        
+        using var peStream = new MemoryStream();
+        var emitResult = wrapperCompilation.Emit(peStream);
+        
+        if (!emitResult.Success)
+        {
+            var errors = string.Join("; ", emitResult.Diagnostics
+                .Where(d => d.Severity == DiagnosticSeverity.Error)
+                .Take(3)
+                .Select(d => d.GetMessage(CultureInfo.InvariantCulture)));
+            return (null, $"Failed to compile argument expressions: {errors}");
+        }
+        
+        peStream.Position = 0;
+        
+        try
+        {
+            var assembly = Assembly.Load(peStream.ToArray());
+            var wrapperType = assembly.GetType("ComptimeWrapper.Wrapper");
+            if (wrapperType is null)
+            {
+                return (null, "Could not find wrapper type");
+            }
+            
+            var executeMethod = wrapperType.GetMethod("Execute", BindingFlags.Public | BindingFlags.Static);
+            if (executeMethod is null)
+            {
+                return (null, "Could not find Execute method");
+            }
+            
+            var result = executeMethod.Invoke(null, null);
+            return (result, null);
+        }
+        catch (TargetInvocationException ex)
+        {
+            return (null, ex.InnerException?.Message ?? ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return (null, ex.Message);
+        }
     }
 
     private static RoslynCompilation RunAdditionalGenerators(

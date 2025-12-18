@@ -99,4 +99,76 @@ public class ComptimeMethodsTests
         Assert.NotNull(vowels);
         Assert.Equal(new[] { 'a', 'e', 'i', 'o', 'u' }, vowels);
     }
+
+    [Fact]
+    public void Factorial_ReturnsCorrectValue()
+    {
+        Assert.Equal(1L, ComptimeMethods.Factorial(0));
+        Assert.Equal(1L, ComptimeMethods.Factorial(1));
+        Assert.Equal(2L, ComptimeMethods.Factorial(2));
+        Assert.Equal(6L, ComptimeMethods.Factorial(3));
+        Assert.Equal(120L, ComptimeMethods.Factorial(5));
+        Assert.Equal(3628800L, ComptimeMethods.Factorial(10));
+    }
+
+    [Fact]
+    public void Fibonacci_ReturnsCorrectValue()
+    {
+        Assert.Equal(0, ComptimeMethods.Fibonacci(0));
+        Assert.Equal(1, ComptimeMethods.Fibonacci(1));
+        Assert.Equal(1, ComptimeMethods.Fibonacci(2));
+        Assert.Equal(2, ComptimeMethods.Fibonacci(3));
+        Assert.Equal(5, ComptimeMethods.Fibonacci(5));
+        Assert.Equal(55, ComptimeMethods.Fibonacci(10));
+    }
+
+    [Fact]
+    public void Greet_ReturnsCorrectMessage()
+    {
+        Assert.Equal("Hello, World!", ComptimeMethods.Greet("World"));
+        Assert.Equal("Hello, Alice!", ComptimeMethods.Greet("Alice"));
+        Assert.Equal("Hello, Bob!", ComptimeMethods.Greet("Bob"));
+    }
+
+    [Fact]
+    public void Add_ReturnsCorrectSum()
+    {
+        Assert.Equal(3, ComptimeMethods.Add(1, 2));
+        Assert.Equal(0, ComptimeMethods.Add(0, 0));
+        Assert.Equal(100, ComptimeMethods.Add(50, 50));
+        Assert.Equal(-5, ComptimeMethods.Add(-10, 5));
+    }
+
+    [Fact]
+    public void SumList_WithListInitializer_ReturnsSum()
+    {
+        // Test with list initializer syntax
+        Assert.Equal(15, ComptimeMethods.SumList(new List<int> { 1, 2, 3, 4, 5 }));
+        Assert.Equal(0, ComptimeMethods.SumList(new List<int>()));
+        Assert.Equal(100, ComptimeMethods.SumList(new List<int> { 100 }));
+    }
+
+    [Fact]
+    public void SumList_WithArrayInitializer_ReturnsSum()
+    {
+        // Test with array initializer syntax
+        Assert.Equal(6, ComptimeMethods.SumList(new[] { 1, 2, 3 }));
+        Assert.Equal(10, ComptimeMethods.SumList(new int[] { 1, 2, 3, 4 }));
+    }
+
+    [Fact]
+    public void CountItems_ReturnsCorrectCount()
+    {
+        Assert.Equal(3, ComptimeMethods.CountItems(new List<int> { 1, 2, 3 }));
+        Assert.Equal(5, ComptimeMethods.CountItems(new[] { "a", "b", "c", "d", "e" }));
+        Assert.Equal(0, ComptimeMethods.CountItems(new List<string>()));
+    }
+
+    [Fact]
+    public void JoinStrings_ReturnsJoinedString()
+    {
+        Assert.Equal("a,b,c", ComptimeMethods.JoinStrings(new[] { "a", "b", "c" }, ","));
+        Assert.Equal("hello world", ComptimeMethods.JoinStrings(new List<string> { "hello", "world" }, " "));
+        Assert.Equal("abc", ComptimeMethods.JoinStrings(new[] { "a", "b", "c" }, ""));
+    }
 }

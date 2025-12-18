@@ -141,4 +141,83 @@ public static partial class ComptimeMethods
     {
         return new[] { 'a', 'e', 'i', 'o', 'u' };
     }
+
+    /// <summary>
+    /// Returns the factorial of n computed at compile time.
+    /// </summary>
+    [Comptime]
+    public static long Factorial(int n)
+    {
+        if (n <= 1) return 1;
+        long result = 1;
+        for (int i = 2; i <= n; i++)
+        {
+            result *= i;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Returns the nth Fibonacci number computed at compile time.
+    /// </summary>
+    [Comptime]
+    public static int Fibonacci(int n)
+    {
+        if (n <= 0) return 0;
+        if (n == 1) return 1;
+        
+        int a = 0, b = 1;
+        for (int i = 2; i <= n; i++)
+        {
+            int temp = a + b;
+            a = b;
+            b = temp;
+        }
+        return b;
+    }
+
+    /// <summary>
+    /// Returns a greeting message with the given name computed at compile time.
+    /// </summary>
+    [Comptime]
+    public static string Greet(string name)
+    {
+        return $"Hello, {name}!";
+    }
+
+    /// <summary>
+    /// Returns the sum of two numbers computed at compile time.
+    /// </summary>
+    [Comptime]
+    public static int Add(int a, int b)
+    {
+        return a + b;
+    }
+
+    /// <summary>
+    /// Returns the sum of all numbers in a list computed at compile time.
+    /// </summary>
+    [Comptime]
+    public static int SumList(IReadOnlyList<int> numbers)
+    {
+        return numbers.Sum();
+    }
+
+    /// <summary>
+    /// Returns the count of items in a collection computed at compile time.
+    /// </summary>
+    [Comptime]
+    public static int CountItems<T>(IReadOnlyList<T> items)
+    {
+        return items.Count;
+    }
+
+    /// <summary>
+    /// Returns the concatenation of strings computed at compile time.
+    /// </summary>
+    [Comptime]
+    public static string JoinStrings(IReadOnlyList<string> strings, string separator)
+    {
+        return string.Join(separator, strings);
+    }
 }
